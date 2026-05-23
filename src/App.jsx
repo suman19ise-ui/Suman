@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import './App.css'
 
@@ -9,6 +9,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [currentReciter, setCurrentReciter] = useState('ar.alafasy')
+  const audioRef = useRef(null)
 
   const reciters = [
     { id: 'ar.alafasy', name: '🎤 Mishari Alafasy' },
@@ -21,12 +22,15 @@ function App() {
   useEffect(() => {
     const fetchSurahs = async () => {
       try {
+        console.log('Fetching Surahs...')
         const response = await axios.get('https://api.alquran.cloud/v1/surah')
+        console.log('Surahs loaded:', response.data.data.length)
         setSurahs(response.data.data)
         // Fetch first surah verses
         fetchVerses(1)
       } catch (error) {
         console.error('Error fetching Surahs:', error)
+        alert('Failed to load Surahs. Check your internet connection.')
       }
     }
     fetchSurahs()
@@ -36,42 +40,99 @@ function App() {
   const fetchVerses = async (surahNumber) => {
     setLoading(true)
     try {
+      console.log('Fetching verses for Surah:', surahNumber)
       const response = await axios.get(
         `https://api.alquran.cloud/v1/surah/${surahNumber}`
       )
+      console.log('Verses loaded:', response.data.data.ayahs.length)
       setVerses(response.data.data.ayahs)
     } catch (error) {
       console.error('Error fetching verses:', error)
+      alert('Failed to load verses.')
     }
     setLoading(false)
   }
 
   const handleSurahChange = (e) => {
     const surahNum = parseInt(e.target.value)
+    console.log('Surah changed to:', surahNum)
     setSelectedSurah(surahNum)
+    stopAudio()
     fetchVerses(surahNum)
   }
 
   const playAudio = () => {
-    if (playing) return
-    
-    setPlaying(true)
-    const audioUrl = `https://cdn.islamic.network/quran/audio/128/${currentReciter}/${selectedSurah}.mp3`
-    const audio = new Audio(audioUrl)
-    
-    audio.onended = () => setPlaying(false)
-    audio.onerror = () => {
-      console.error('Error playing audio')
-      setPlaying(false)
-      alert('Audio not available for this reciter')
+    if (playing) {
+      console.log('Already playing')
+      return
     }
     
-    audio.play()
+    console.log('Play button clicked')
+    console.log('Reciter:', currentReciter)
+    console.log('Surah:', selectedSurah)
+    
+    const audioUrl = `https://cdn.islamic.network/quran/audio/128/${currentReciter}/${selectedSurah}.mp3`
+    console.log('Audio URL:', audioUrl)
+    
+    // Stop previous audio if any
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    
+    const audio = new Audio()
+    audio.crossOrigin = 'anonymous'
+    audio.src = audioUrl
+    
+    audio.onloadstart = () => {
+      console.log('Audio loading...')
+    }
+    
+    audio.oncanplay = () => {
+      console.log('Audio ready to play')
+      audio.play().catch(err => {
+        console.error('Play error:', err)
+        setPlaying(false)
+        alert('Could not play audio: ' + err.message)
+      })
+    }
+    
+    audio.onplay = () => {
+      console.log('Audio playing!')
+      setPlaying(true)
+    }
+    
+    audio.onended = () => {
+      console.log('Audio ended')
+      setPlaying(false)
+      audioRef.current = null
+    }
+    
+    audio.onerror = (e) => {
+      console.error('Audio error:', e, audio.error)
+      setPlaying(false)
+      audioRef.current = null
+      alert('Audio not available for this reciter. Try another one.')
+    }
+    
+    audio.onabort = () => {
+      console.log('Audio aborted')
+      setPlaying(false)
+      audioRef.current = null
+    }
+    
+    audioRef.current = audio
+    audio.load()
   }
 
   const stopAudio = () => {
+    console.log('Stop button clicked')
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
+    }
     setPlaying(false)
-    // Note: To properly stop, we'd need to maintain audio ref
   }
 
   const currentSurah = surahs.find(s => s.number === selectedSurah)
@@ -119,7 +180,11 @@ function App() {
           <select 
             id="reciter-dropdown"
             value={currentReciter} 
-            onChange={(e) => setCurrentReciter(e.target.value)}
+            onChange={(e) => {
+              console.log('Reciter changed to:', e.target.value)
+              setCurrentReciter(e.target.value)
+              stopAudio()
+            }}
             className="dropdown"
           >
             {reciters.map(reciter => (
@@ -137,7 +202,7 @@ function App() {
             disabled={playing}
             className="btn btn-primary"
           >
-            {playing ? '▶️ Playing...' : '▶️ Play Audio'}
+            {playing ? '⏳ Playing...' : '▶️ Play Audio'}
           </button>
           <button 
             onClick={stopAudio}
@@ -152,6 +217,8 @@ function App() {
         <div className="verses-container">
           {loading ? (
             <p className="loading">Loading verses...</p>
+          ) : verses.length === 0 ? (
+            <p className="loading">No verses loaded yet</p>
           ) : (
             verses.map((verse, index) => (
               <div key={index} className="verse-card">
